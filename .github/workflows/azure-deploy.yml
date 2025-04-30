@@ -1,0 +1,86 @@
+name: Build, Push, and Deploy to ACI
+
+on:
+  push:
+    branches: [ main ] # Trigger on pushes to the main branch
+  workflow_dispatch: # Allow manual trigger from GitHub UI
+
+env:
+  # Use secrets for resource names
+  RESOURCE_GROUP: ${{ secrets.RESOURCE_GROUP_NAME }}
+  ACR_NAME: ${{ secrets.ACR_NAME }}
+  # Define image name using ACR login server and commit SHA for uniqueness
+  IMAGE_NAME: ${{ secrets.ACR_NAME }}.azurecr.io/${{ github.repository }}:${{ github.sha }}
+  # Define ACI instance name using run number for uniqueness per run
+  CONTAINER_INSTANCE_NAME: my-devops-cli-app-${{ github.run_number }}
+  LOCATION: eastus # Or your chosen Azure location
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4 # Use latest checkout action
+
+    - name: Azure Login using Service Principal
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: ACR Login using Azure Credentials
+      run: az acr login --name ${{ env.ACR_NAME }}
+
+    - name: Build and Push Docker image
+      run: |
+        docker build . -t ${{ env.IMAGE_NAME }}
+        echo "Pushing image: ${{ env.IMAGE_NAME }}"
+        docker push ${{ env.IMAGE_NAME }}
+
+  deploy-to-aci:
+    needs: build-and-push # Run only after build-and-push succeeds
+    runs-on: ubuntu-latest
+    steps:
+    - name: Azure Login using Service Principal
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Get ACR Credentials (Username and Password)
+      id: acr_creds # Give this step an ID to reference its output
+      run: |
+        ACR_USERNAME=$(az acr credential show --name ${{ env.ACR_NAME }} --query username --output tsv)
+        ACR_PASSWORD=$(az acr credential show --name ${{ env.ACR_NAME }} --query passwords[0].value --output tsv)
+        echo "ACR_USERNAME=$ACR_USERNAME" >> $GITHUB_OUTPUT
+        echo "ACR_PASSWORD=$ACR_PASSWORD" >> $GITHUB_OUTPUT
+      shell: bash
+
+    - name: Deploy to Azure Container Instances using Azure CLI
+      run: |
+        echo "Deploying container instance: ${{ env.CONTAINER_INSTANCE_NAME }}"
+        echo "Using image: ${{ env.IMAGE_NAME }}"
+
+        az container create \
+          --resource-group ${{ env.RESOURCE_GROUP }} \
+          --name ${{ env.CONTAINER_INSTANCE_NAME }} \
+          --image ${{ env.IMAGE_NAME }} \
+          --registry-login-server ${{ env.ACR_NAME }}.azurecr.io \
+          --registry-username ${{ steps.acr_creds.outputs.ACR_USERNAME }} \
+          --registry-password ${{ steps.acr_creds.outputs.ACR_PASSWORD }} \
+          --dns-name-label ${{ env.CONTAINER_INSTANCE_NAME }} \
+          --ports 80 \
+          --location ${{ env.LOCATION }} \
+          --cpu 1 \
+          --memory 1 \
+          --query "{FQDN:ipAddress.fqdn,ProvisioningState:provisioningState}" \
+          --output table
+
+    - name: Show ACI Details (including FQDN)
+      run: |
+        echo "Waiting briefly for ACI FQDN propagation..."
+        sleep 15 # Give DNS a moment
+        az container show \
+          --resource-group ${{ env.RESOURCE_GROUP }} \
+          --name ${{ env.CONTAINER_INSTANCE_NAME }} \
+          --query "{FQDN:ipAddress.fqdn, IP:ipAddress.ip, State:instanceView.state}" \
+          --output table
+        echo "Access the app at: http://$(az container show --resource-group ${{ env.RESOURCE_GROUP }} --name ${{ env.CONTAINER_INSTANCE_NAME }} --query ipAddress.fqdn --output tsv)"

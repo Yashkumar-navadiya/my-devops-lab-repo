@@ -69,7 +69,7 @@ jobs:
           --dns-name-label ${{ env.CONTAINER_INSTANCE_NAME }} \
           --ports 80 \
           --location ${{ env.LOCATION }} \
-          --os-type linux
+          --os-type linux \
           --cpu 1 \
           --memory 1 \
           --query "{FQDN:ipAddress.fqdn,ProvisioningState:provisioningState}" \

@@ -10,7 +10,7 @@ env:
   RESOURCE_GROUP: ${{ secrets.RESOURCE_GROUP_NAME }}
   ACR_NAME: ${{ secrets.ACR_NAME }}
   # Define image name using ACR login server and commit SHA for uniqueness
-  IMAGE_NAME: ${{ secrets.ACR_NAME }}.azurecr.io/${{ github.repository }}:${{ github.sha }}
+  IMAGE_NAME: ${{ secrets.ACR_NAME }}.azurecr.io/mydevopslabrepo:${{ github.sha }}
   # Define ACI instance name using run number for uniqueness per run
   CONTAINER_INSTANCE_NAME: my-devops-cli-app-${{ github.run_number }}
   LOCATION: eastus # Or your chosen Azure location
